@@ -6,25 +6,83 @@
 @section('content')
 
 <!-- Filter Bar -->
-<div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
-    <div class="flex items-center gap-2">
-        <span class="text-sm font-semibold text-slate-700">Filtrer par Région :</span>
-        <form method="GET" action="{{ route('dashboard') }}" class="flex items-center gap-2">
-            <select name="region" onchange="this.form.submit()" class="bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-xl px-3 py-2 font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-                <option value="">Toutes les régions (14)</option>
-                @foreach($regionsList as $reg)
-                    <option value="{{ $reg->nom }}" {{ $regionFilter == $reg->nom ? 'selected' : '' }}>{{ $reg->nom }}</option>
-                @endforeach
-            </select>
-            @if($regionFilter)
-                <a href="{{ route('dashboard') }}" class="text-xs text-rose-600 hover:underline font-semibold ml-2">Réinitialiser</a>
-            @endif
-        </form>
+<div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div class="flex items-center gap-2">
+            <span class="text-base">📊</span>
+            <div>
+                <h4 class="text-xs font-bold text-slate-800 uppercase tracking-wider">Filtrer les Indicateurs Nationaux</h4>
+                <p class="text-[11px] text-slate-500">Personnalisez la période d'analyse (dates personnalisées ou raccourcis) et la région.</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2 text-[11px] text-slate-500">
+            <span>Dernière synchro : <strong class="text-slate-800">{{ now()->format('d/m/Y H:i') }}</strong></span>
+        </div>
     </div>
 
-    <div class="flex items-center gap-2 text-xs text-slate-500 font-medium">
-        <span>Dernière synchronisation terrain : <strong class="text-slate-800">{{ now()->format('d/m/Y H:i') }}</strong></span>
-    </div>
+    <form method="GET" action="{{ route('dashboard') }}" class="space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <!-- Région -->
+            <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1">Région</label>
+                <select name="region" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                    <option value="">Toutes les régions (14)</option>
+                    @foreach($regionsList as $reg)
+                        <option value="{{ $reg->nom }}" {{ $regionFilter == $reg->nom ? 'selected' : '' }}>{{ $reg->nom }}</option>
+                    @endforeach
+                </select>
+            </div>
+
+            <!-- Raccourci Période -->
+            <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1">Période Prédéfinie</label>
+                <select name="periode" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                    <option value="">Historique complet ou dates manuelles</option>
+                    <option value="ce_jour" {{ request('periode') == 'ce_jour' ? 'selected' : '' }}>Aujourd'hui</option>
+                    <option value="cette_semaine" {{ request('periode') == 'cette_semaine' ? 'selected' : '' }}>Cette semaine</option>
+                    <option value="ce_mois" {{ request('periode') == 'ce_mois' ? 'selected' : '' }}>Ce mois-ci (Mois en cours)</option>
+                    <option value="dernier_mois" {{ request('periode') == 'dernier_mois' ? 'selected' : '' }}>Le mois dernier</option>
+                    <option value="ce_trimestre" {{ request('periode') == 'ce_trimestre' ? 'selected' : '' }}>Ce trimestre</option>
+                    <option value="cette_annee" {{ request('periode') == 'cette_annee' ? 'selected' : '' }}>Cette année</option>
+                </select>
+            </div>
+
+            <!-- Date Début -->
+            <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1">Date Début</label>
+                <input type="date" name="date_debut" value="{{ request('date_debut') }}" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+            </div>
+
+            <!-- Date Fin -->
+            <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1">Date Fin</label>
+                <input type="date" name="date_fin" value="{{ request('date_fin') }}" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+            <div class="flex items-center gap-2">
+                <button type="submit" class="py-2 px-5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg>
+                    <span>Appliquer les filtres</span>
+                </button>
+                @if(request()->hasAny(['region', 'periode', 'date_debut', 'date_fin']))
+                    <a href="{{ route('dashboard') }}" class="px-3 py-2 text-xs text-rose-600 font-semibold hover:underline">Réinitialiser</a>
+                @endif
+            </div>
+
+            <div class="flex items-center gap-2">
+                @if(request()->filled('date_debut') || request()->filled('date_fin') || request()->filled('periode') || request()->filled('region'))
+                    <span class="text-xs text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200 font-medium">
+                        ✓ Période / Région active
+                    </span>
+                    <a href="{{ route('exports.index', request()->query()) }}" class="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-xl transition">
+                        <span>📥 Exporter cette sélection</span>
+                    </a>
+                @endif
+            </div>
+        </div>
+    </form>
 </div>
 
 <!-- Macro Banner: Cible 100 000 Foyers Améliorés -->

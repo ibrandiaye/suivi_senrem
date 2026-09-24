@@ -8,6 +8,7 @@ use App\Models\FicheDemonstrationCulinaire;
 use App\Models\FicheEmissionsRadio;
 use App\Models\FicheLeaderOpinion;
 use App\Models\FicheVentesDistributeur;
+use App\Models\Region;
 use Illuminate\Http\Request;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
@@ -15,18 +16,106 @@ class ExportController extends Controller
 {
     public function index()
     {
-        return view('exports.index');
+        $regions = Region::orderBy('nom')->get();
+        return view('exports.index', compact('regions'));
+    }
+
+    /**
+     * Applique les filtres de date et période à une requête Eloquent.
+     */
+    private function applyDateAndPeriodFilter($query, Request $request, string $dateColumn, bool $useCreatedAtFallback = false)
+    {
+        $dateDebut = $request->date_debut;
+        $dateFin = $request->date_fin;
+
+        // Raccourcis de période prédéfinie
+        if (!$dateDebut && !$dateFin && $request->filled('periode')) {
+            switch ($request->periode) {
+                case 'ce_jour':
+                    $dateDebut = now()->toDateString();
+                    $dateFin = now()->toDateString();
+                    break;
+                case 'cette_semaine':
+                    $dateDebut = now()->startOfWeek()->toDateString();
+                    $dateFin = now()->endOfWeek()->toDateString();
+                    break;
+                case 'ce_mois':
+                    $dateDebut = now()->startOfMonth()->toDateString();
+                    $dateFin = now()->endOfMonth()->toDateString();
+                    break;
+                case 'dernier_mois':
+                    $dateDebut = now()->subMonth()->startOfMonth()->toDateString();
+                    $dateFin = now()->subMonth()->endOfMonth()->toDateString();
+                    break;
+                case 'ce_trimestre':
+                    $dateDebut = now()->firstOfQuarter()->toDateString();
+                    $dateFin = now()->lastOfQuarter()->toDateString();
+                    break;
+                case 'cette_annee':
+                    $dateDebut = now()->startOfYear()->toDateString();
+                    $dateFin = now()->endOfYear()->toDateString();
+                    break;
+            }
+        }
+
+        if ($dateDebut) {
+            if ($useCreatedAtFallback) {
+                $query->where(function ($q) use ($dateDebut, $dateColumn) {
+                    $q->whereDate($dateColumn, '>=', $dateDebut)
+                      ->orWhere(function ($sub) use ($dateDebut, $dateColumn) {
+                          $sub->whereNull($dateColumn)
+                              ->whereDate('created_at', '>=', $dateDebut);
+                      });
+                });
+            } else {
+                $query->whereDate($dateColumn, '>=', $dateDebut);
+            }
+        }
+
+        if ($dateFin) {
+            if ($useCreatedAtFallback) {
+                $query->where(function ($q) use ($dateFin, $dateColumn) {
+                    $q->whereDate($dateColumn, '<=', $dateFin)
+                      ->orWhere(function ($sub) use ($dateFin, $dateColumn) {
+                          $sub->whereNull($dateColumn)
+                              ->whereDate('created_at', '<=', $dateFin);
+                      });
+                });
+            } else {
+                $query->whereDate($dateColumn, '<=', $dateFin);
+            }
+        }
     }
 
     public function export(Request $request, string $type)
     {
-        $filename = "SENRM_Export_{$type}_" . date('Y-m-d_His') . ".xlsx";
+        $dateSuffix = '';
+        if ($request->filled('date_debut') || $request->filled('date_fin')) {
+            $dateSuffix = '_' . ($request->date_debut ? "du_{$request->date_debut}" : '') . ($request->date_fin ? "_au_{$request->date_fin}" : '');
+        } elseif ($request->filled('periode')) {
+            $dateSuffix = "_{$request->periode}";
+        }
+
+        $regionSuffix = $request->filled('region') ? '_' . str_replace(' ', '_', $request->region) : '';
+        $filename = "SENRM_Export_{$type}{$dateSuffix}{$regionSuffix}_" . date('His') . ".xlsx";
         $writer = SimpleExcelWriter::streamDownload($filename);
 
         switch ($type) {
             case 'ventes-distributeurs':
-                $ventes = FicheVentesDistributeur::with(['items.foyerType', 'user'])->get();
-                foreach ($ventes as $v) {
+                $query = FicheVentesDistributeur::with(['items.foyerType', 'user'])->latest('date_vente');
+                if ($request->filled('region')) {
+                    $query->where('region', $request->region);
+                }
+                if ($request->filled('search')) {
+                    $query->where(function ($q) use ($request) {
+                        $q->where('distributeur_nom', 'like', "%{$request->search}%")
+                          ->orWhere('village_quartier', 'like', "%{$request->search}%")
+                          ->orWhere('adresse_client', 'like', "%{$request->search}%");
+                    });
+                }
+                $this->applyDateAndPeriodFilter($query, $request, 'date_vente');
+
+                foreach ($query->get() as $v) {
                     $row = [
                         'UUID' => $v->uuid,
                         'Agent Collecteur' => $v->user ? $v->user->name : 'N/A',
@@ -53,8 +142,20 @@ class ExportController extends Controller
                 break;
 
             case 'animations':
-                $animations = FicheAnimationVente::with('user')->get();
-                foreach ($animations as $a) {
+                $query = FicheAnimationVente::with('user')->latest('date_animation');
+                if ($request->filled('region')) {
+                    $query->where('region', $request->region);
+                }
+                if ($request->filled('search')) {
+                    $query->where(function ($q) use ($request) {
+                        $q->where('distributeur_nom', 'like', "%{$request->search}%")
+                          ->orWhere('animateur_nom', 'like', "%{$request->search}%")
+                          ->orWhere('commune', 'like', "%{$request->search}%");
+                    });
+                }
+                $this->applyDateAndPeriodFilter($query, $request, 'date_animation');
+
+                foreach ($query->get() as $a) {
                     $writer->addRow([
                         'UUID' => $a->uuid,
                         'Agent Collecteur' => $a->user ? $a->user->name : $a->animateur_nom,
@@ -77,8 +178,20 @@ class ExportController extends Controller
                 break;
 
             case 'demonstrations':
-                $demos = FicheDemonstrationCulinaire::with('user')->get();
-                foreach ($demos as $d) {
+                $query = FicheDemonstrationCulinaire::with('user')->latest('date_demonstration');
+                if ($request->filled('region')) {
+                    $query->where('region', $request->region);
+                }
+                if ($request->filled('search')) {
+                    $query->where(function ($q) use ($request) {
+                        $q->where('gpf_nom', 'like', "%{$request->search}%")
+                          ->orWhere('presidente_nom', 'like', "%{$request->search}%")
+                          ->orWhere('commune', 'like', "%{$request->search}%");
+                    });
+                }
+                $this->applyDateAndPeriodFilter($query, $request, 'date_demonstration');
+
+                foreach ($query->get() as $d) {
                     $writer->addRow([
                         'UUID' => $d->uuid,
                         'Agent Collecteur' => $d->user ? $d->user->name : $d->responsable_nom,
@@ -105,8 +218,19 @@ class ExportController extends Controller
                 break;
 
             case 'caravanes':
-                $caravanes = FicheCaravane::with(['villagesTouches', 'user'])->get();
-                foreach ($caravanes as $c) {
+                $query = FicheCaravane::with(['villagesTouches', 'user'])->latest('date_caravane');
+                if ($request->filled('region')) {
+                    $query->where('region', $request->region);
+                }
+                if ($request->filled('search')) {
+                    $query->where(function ($q) use ($request) {
+                        $q->where('itineraire', 'like', "%{$request->search}%")
+                          ->orWhere('distributeurs_beneficiaires', 'like', "%{$request->search}%");
+                    });
+                }
+                $this->applyDateAndPeriodFilter($query, $request, 'date_caravane');
+
+                foreach ($query->get() as $c) {
                     $villagesList = $c->villagesTouches->pluck('nom_village_quartier')->join(', ');
                     $writer->addRow([
                         'UUID' => $c->uuid,
@@ -133,8 +257,20 @@ class ExportController extends Controller
                 break;
 
             case 'emissions':
-                $emissions = FicheEmissionsRadio::with(['participants', 'user'])->get();
-                foreach ($emissions as $e) {
+                $query = FicheEmissionsRadio::with(['participants', 'user'])->latest('date_emission');
+                if ($request->filled('region')) {
+                    $query->where('region', $request->region);
+                }
+                if ($request->filled('search')) {
+                    $query->where(function ($q) use ($request) {
+                        $q->where('radio_nom', 'like', "%{$request->search}%")
+                          ->orWhere('theme', 'like', "%{$request->search}%")
+                          ->orWhere('animateur_nom', 'like', "%{$request->search}%");
+                    });
+                }
+                $this->applyDateAndPeriodFilter($query, $request, 'date_emission');
+
+                foreach ($query->get() as $e) {
                     $parts = $e->participants->map(fn($p) => "{$p->prenom_nom} ({$p->sexe}, {$p->profession})")->join('; ');
                     $writer->addRow([
                         'UUID' => $e->uuid,
@@ -158,8 +294,20 @@ class ExportController extends Controller
                 break;
 
             case 'leaders':
-                $leaders = FicheLeaderOpinion::with('user')->get();
-                foreach ($leaders as $l) {
+                $query = FicheLeaderOpinion::with('user')->latest();
+                if ($request->filled('region')) {
+                    $query->where('region', $request->region);
+                }
+                if ($request->filled('search')) {
+                    $query->where(function ($q) use ($request) {
+                        $q->where('prenom_nom', 'like', "%{$request->search}%")
+                          ->orWhere('titre_profession', 'like', "%{$request->search}%")
+                          ->orWhere('membre_entites', 'like', "%{$request->search}%");
+                    });
+                }
+                $this->applyDateAndPeriodFilter($query, $request, 'client_created_at', true);
+
+                foreach ($query->get() as $l) {
                     $writer->addRow([
                         'UUID' => $l->uuid,
                         'Agent Collecteur' => $l->user ? $l->user->name : $l->responsable_nom,

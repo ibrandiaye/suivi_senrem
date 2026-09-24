@@ -51,7 +51,7 @@ class SenrmPlatformTest extends TestCase
         $response = $this->get('/login');
         $response->assertStatus(200);
         $response->assertSee('Plateforme SENRM');
-        $response->assertSee('Connexion Administrateur');
+        $response->assertSee('Espace Administration Centrale');
     }
 
     /**
@@ -81,6 +81,22 @@ class SenrmPlatformTest extends TestCase
         $response->assertStatus(200);
         $response->assertSee('SENRM');
         $response->assertSee('100 000');
+    }
+
+    /**
+     * Test dashboard with period filters.
+     */
+    public function test_dashboard_period_filters(): void
+    {
+        $admin = $this->getAdminUser();
+
+        $response = $this->actingAs($admin)->get('/?date_debut=2026-09-01&date_fin=2026-09-30');
+        $response->assertStatus(200);
+        $response->assertSee('Période / Région active');
+
+        $responsePreset = $this->actingAs($admin)->get('/?periode=ce_mois');
+        $responsePreset->assertStatus(200);
+        $responsePreset->assertSee('Période / Région active');
     }
 
     /**
@@ -119,6 +135,7 @@ class SenrmPlatformTest extends TestCase
             'name' => 'Agent Fatick Test',
             'email' => $email,
             'password' => 'secret1234',
+            'password_confirmation' => 'secret1234',
             'role' => 'animateur',
             'region' => 'Fatick',
             'telephone' => '778889900',
@@ -284,5 +301,55 @@ class SenrmPlatformTest extends TestCase
             'user_id' => $user->id,
             'region' => 'Tambacounda',
         ]);
+    }
+
+    /**
+     * Test fiches listing with date and period filters.
+     */
+    public function test_fiches_period_filters(): void
+    {
+        $admin = $this->getAdminUser();
+
+        // Test with explicit date range
+        $response = $this->actingAs($admin)->get('/fiches/ventes-distributeurs?date_debut=2026-09-01&date_fin=2026-09-30');
+        $response->assertStatus(200);
+        $response->assertSee('Filtre période actif');
+
+        // Test with quick period shortcut
+        $responsePreset = $this->actingAs($admin)->get('/fiches/animations?periode=ce_mois');
+        $responsePreset->assertStatus(200);
+        $responsePreset->assertSee('Filtre période actif');
+    }
+
+    /**
+     * Test export download with period filter.
+     */
+    public function test_export_download_with_period(): void
+    {
+        $admin = $this->getAdminUser();
+
+        ob_start();
+        $response = $this->actingAs($admin)->get('/exports/download/ventes-distributeurs?date_debut=2026-09-01&date_fin=2026-09-30&region=Tambacounda');
+        ob_end_clean();
+
+        $response->assertStatus(200);
+        $this->assertInstanceOf(\Symfony\Component\HttpFoundation\StreamedResponse::class, $response->baseResponse);
+        
+        // Prevent StreamedResponse callback from dumping raw binary ZIP content to stdout during PHPUnit termination
+        $response->baseResponse->setCallback(function () {});
+    }
+
+    /**
+     * Test exports index view renders with period controls.
+     */
+    public function test_exports_index_renders_with_period_controls(): void
+    {
+        $admin = $this->getAdminUser();
+
+        $response = $this->actingAs($admin)->get('/exports');
+        $response->assertStatus(200);
+        $response->assertSee('filterPeriode');
+        $response->assertSee('filterDateDebut');
+        $response->assertSee('filterDateFin');
     }
 }
